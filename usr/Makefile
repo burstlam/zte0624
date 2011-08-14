@@ -15,6 +15,12 @@ suffix_$(CONFIG_INITRAMFS_COMPRESSION_BZIP2)  = .bz2
 # Lzma
 suffix_$(CONFIG_INITRAMFS_COMPRESSION_LZMA)   = .lzma
 
+# XZ
+suffix_$(CONFIG_INITRAMFS_COMPRESSION_XZ)     = .xz
+
+# Lzo
+suffix_$(CONFIG_INITRAMFS_COMPRESSION_LZO)   = .lzo
+
 # Generate builtin.o based on initramfs_data.o
 obj-$(CONFIG_BLK_DEV_INITRD) := initramfs_data$(suffix_y).o
 
