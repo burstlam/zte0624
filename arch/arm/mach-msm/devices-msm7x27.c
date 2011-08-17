@@ -364,7 +364,7 @@ struct platform_device msm_device_nand = {
 	.num_resources	= ARRAY_SIZE(resources_nand),
 	.resource	= resources_nand,
 	.dev		= {
-		.platform_data	= &msm_nand_data,
+	.platform_data	= &msm_nand_data,
 	},
 };
 
