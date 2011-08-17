@@ -632,7 +632,7 @@ static int kgsl_g12_waittimestamp(struct kgsl_device *device,
 	KGSL_DRV_INFO("current (device=%p,timestamp=%d)\n",
 			device, g12_device->timestamp);
 
-	timeout = wait_event_interruptible_timeout(
+	timeout = wait_io_event_interruptible_timeout(
 			g12_device->wait_timestamp_wq,
 			kgsl_g12_cmdstream_check_timestamp(g12_device,
 								timestamp),
