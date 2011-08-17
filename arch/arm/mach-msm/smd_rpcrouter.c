@@ -221,21 +221,20 @@ struct rpcrouter_xprt_info {
 };
 
 static LIST_HEAD(xprt_info_list);
-static DEFINE_SPINLOCK(xprt_info_list_lock);
+static DEFINE_MUTEX(xprt_info_list_lock);
 
 static struct rpcrouter_xprt_info *rpcrouter_get_xprt_info(uint32_t remote_pid)
 {
 	struct rpcrouter_xprt_info *xprt_info;
-	unsigned long flags;
 
-	spin_lock_irqsave(&xprt_info_list_lock, flags);
+	mutex_lock(&xprt_info_list_lock);
 	list_for_each_entry(xprt_info, &xprt_info_list, list) {
 		if (xprt_info->remote_pid == remote_pid) {
-			spin_unlock_irqrestore(&xprt_info_list_lock, flags);
+			mutex_unlock(&xprt_info_list_lock);
 			return xprt_info;
 		}
 	}
-	spin_unlock_irqrestore(&xprt_info_list_lock, flags);
+	mutex_unlock(&xprt_info_list_lock);
 	return NULL;
 }
 
@@ -557,15 +556,15 @@ int msm_rpcrouter_destroy_local_endpoint(struct msm_rpc_endpoint *ept)
 	msg.cli.cid = ept->cid;
 
 	RR("x REMOVE_CLIENT id=%d:%08x\n", ept->pid, ept->cid);
-	spin_lock_irqsave(&xprt_info_list_lock, flags);
+	mutex_lock(&xprt_info_list_lock);
 	list_for_each_entry(xprt_info, &xprt_info_list, list) {
 		rc = rpcrouter_send_control_msg(xprt_info, &msg);
 		if (rc < 0) {
-			spin_unlock_irqrestore(&xprt_info_list_lock, flags);
+			mutex_unlock(&xprt_info_list_lock);
 			return rc;
 		}
 	}
-	spin_unlock_irqrestore(&xprt_info_list_lock, flags);
+	mutex_unlock(&xprt_info_list_lock);
 
 	/* Free replies */
 	spin_lock_irqsave(&ept->reply_q_lock, flags);
@@ -1925,7 +1924,6 @@ int msm_rpc_register_server(struct msm_rpc_endpoint *ept,
 	union rr_control_msg msg;
 	struct rr_server *server;
 	struct rpcrouter_xprt_info *xprt_info;
-	unsigned long flags;
 
 	server = rpcrouter_create_server(ept->pid, ept->cid,
 					 prog, vers);
@@ -1941,15 +1939,15 @@ int msm_rpc_register_server(struct msm_rpc_endpoint *ept,
 	RR("x NEW_SERVER id=%d:%08x prog=%08x:%08x\n",
 	   ept->pid, ept->cid, prog, vers);
 
-	spin_lock_irqsave(&xprt_info_list_lock, flags);
+	mutex_lock(&xprt_info_list_lock);
 	list_for_each_entry(xprt_info, &xprt_info_list, list) {
 		rc = rpcrouter_send_control_msg(xprt_info, &msg);
 		if (rc < 0) {
-			spin_unlock_irqrestore(&xprt_info_list_lock, flags);
+			mutex_unlock(&xprt_info_list_lock);
 			return rc;
 		}
 	}
-	spin_unlock_irqrestore(&xprt_info_list_lock, flags);
+	mutex_unlock(&xprt_info_list_lock);
 	return 0;
 }
 
@@ -2023,16 +2021,15 @@ static int msm_rpcrouter_modem_notify(struct notifier_block *this,
 int msm_rpcrouter_close(void)
 {
 	struct rpcrouter_xprt_info *xprt_info, *tmp_xprt_info;
-	unsigned long flags;
 
-	spin_lock_irqsave(&xprt_info_list_lock, flags);
+	mutex_lock(&xprt_info_list_lock);
 	list_for_each_entry_safe(xprt_info, tmp_xprt_info,
 				 &xprt_info_list, list) {
 		xprt_info->xprt->close();
 		list_del(&xprt_info->list);
 		kfree(xprt_info);
 	}
-	spin_unlock_irqrestore(&xprt_info_list_lock, flags);
+	mutex_unlock(&xprt_info_list_lock);
 	return 0;
 }
 
@@ -2197,7 +2194,6 @@ static int msm_rpcrouter_add_xprt(struct rpcrouter_xprt *xprt)
 {
 	struct rpcrouter_xprt_info *xprt_info;
 	static uint32_t workthread_created;
-	unsigned long flags;
 
 	xprt_info = kmalloc(sizeof(struct rpcrouter_xprt_info), GFP_KERNEL);
 	if (!xprt_info)
@@ -2237,9 +2233,9 @@ static int msm_rpcrouter_add_xprt(struct rpcrouter_xprt *xprt)
 		xprt_info->initialized = 1;
 	}
 
-	spin_lock_irqsave(&xprt_info_list_lock, flags);
+	mutex_lock(&xprt_info_list_lock);
 	list_add_tail(&xprt_info->list, &xprt_info_list);
-	spin_unlock_irqrestore(&xprt_info_list_lock, flags);
+	mutex_unlock(&xprt_info_list_lock);
 
 	queue_work(xprt_info->workqueue, &xprt_info->read_data);
 
