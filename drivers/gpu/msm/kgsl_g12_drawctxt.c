@@ -99,6 +99,7 @@ kgsl_g12_drawctxt_destroy(struct kgsl_device *device,
 		memset(&g_z1xx, 0, sizeof(struct kgsl_g12_z1xx));
 		g12_device->timestamp = 0;
 		g12_device->current_timestamp = 0;
+		kgsl_g12_idle(device, KGSL_TIMEOUT_DEFAULT);
 	}
 
 	return KGSL_SUCCESS;
