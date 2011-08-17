@@ -1843,3 +1843,4 @@ kgsl_drawctxt_switch(struct kgsl_yamato_device *yamato_device,
 
 	KGSL_CTXT_INFO("return\n");
 }
+

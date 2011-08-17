@@ -39,6 +39,12 @@
 
 struct kgsl_g12_device;
 
+int kgsl_g12_cmdstream_init(struct kgsl_device *device);
+
+int kgsl_g12_cmdstream_start(struct kgsl_device *device);
+
+void kgsl_g12_cmdstream_close(struct kgsl_device *device);
+
 int kgsl_g12_cmdstream_check_timestamp(struct kgsl_g12_device *g12_device,
 					unsigned int timestamp);
 unsigned int kgsl_g12_cmdstream_readtimestamp(struct kgsl_device *device,
@@ -51,3 +57,4 @@ int kgsl_g12_cmdstream_issueibcmds(struct kgsl_device_private *dev_priv,
 			uint32_t *timestamp,
 			unsigned int ctrl);
 #endif  /* _GSL_CMDSTREAM_H */
+
