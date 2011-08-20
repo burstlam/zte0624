@@ -34,7 +34,6 @@
 struct kgsl_g12_ringbuffer {
 	unsigned int prevctx;
 	unsigned int numcontext;
-	unsigned int ctxt_id_mask;
 	struct kgsl_memdesc      cmdbufdesc;
 };
 
