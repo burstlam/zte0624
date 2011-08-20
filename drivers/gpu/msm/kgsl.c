@@ -39,8 +39,6 @@
 #include <asm/atomic.h>
 #include <mach/internal_power_rail.h>
 
-#include <linux/ashmem.h>
-
 #include "kgsl.h"
 #include "kgsl_yamato.h"
 #include "kgsl_g12.h"
@@ -933,11 +931,8 @@ void kgsl_remove_mem_entry(struct kgsl_mem_entry *entry, bool preserve)
 	if (KGSL_MEMFLAGS_VMALLOC_MEM & entry->memdesc.priv) {
 		vfree((void *)entry->memdesc.physaddr);
 		entry->priv->vmalloc_size -= entry->memdesc.size;
-        } else if (KGSL_MEMFLAGS_HOSTADDR & entry->memdesc.priv &&
-                        entry->file_ptr)
-                put_ashmem_file(entry->file_ptr);
-        else
-                kgsl_put_phys_file(entry->file_ptr);
+	} else
+		kgsl_put_phys_file(entry->pmem_file);
 
 	/* remove the entry from list and free_list if it exists */
 	if (entry->list.prev)
@@ -973,32 +968,6 @@ done:
 	return result;
 }
 
-static struct vm_area_struct *kgsl_get_vma_from_start_addr(unsigned int addr)
-{
-        struct vm_area_struct *vma;
-        int len;
- 
-        vma = find_vma(current->mm, addr);
-        if (!vma) {
-                KGSL_MEM_ERR("Could not find vma for address %x\n",
-                           addr);
-                return NULL;
-        }
-        len = vma->vm_end - vma->vm_start;
-        if (vma->vm_pgoff || !KGSL_IS_PAGE_ALIGNED(len) ||
-          !KGSL_IS_PAGE_ALIGNED(vma->vm_start)) {
-                KGSL_MEM_ERR
-                ("user address mapping must be at offset 0 and page aligned\n");
-                return NULL;
-        }
-        if (vma->vm_start != addr) {
-                KGSL_MEM_ERR
-                  ("vma start address is not equal to mmap address\n");
-                return NULL;
-        }
-        return vma;
-}
- 
 #ifdef CONFIG_MSM_KGSL_MMU
 static long kgsl_ioctl_sharedmem_from_vmalloc(struct kgsl_file_private *private,
 					      void __user *arg)
@@ -1024,10 +993,25 @@ static long kgsl_ioctl_sharedmem_from_vmalloc(struct kgsl_file_private *private,
 
 	vma = find_vma(current->mm, param.hostptr);
 	if (!vma) {
+		KGSL_MEM_ERR("Could not find vma for address %x\n",
+			     param.hostptr);
 		result = -EINVAL;
 		goto error;
 	}
 	len = vma->vm_end - vma->vm_start;
+	if (vma->vm_pgoff || !KGSL_IS_PAGE_ALIGNED(len) ||
+	    !KGSL_IS_PAGE_ALIGNED(vma->vm_start)) {
+		KGSL_MEM_ERR
+		("kgsl vmalloc mapping must be at offset 0 and page aligned\n");
+		result = -EINVAL;
+		goto error;
+	}
+	if (vma->vm_start != param.hostptr) {
+		KGSL_MEM_ERR
+		    ("vma start address is not equal to mmap address\n");
+		result = -EINVAL;
+		goto error;
+	}
 
 	if ((private->vmalloc_size + len) > KGSL_GRAPHICS_MEMORY_LOW_WATERMARK
 	    && !param.force_no_low_watermark) {
@@ -1159,37 +1143,25 @@ static void kgsl_put_phys_file(struct file *file)
 		put_pmem_file(file);
 }
 
-static int kgsl_ioctl_map_user_mem(struct kgsl_file_private *private,
-                                                void __user *arg,
-                                                unsigned int cmd)
+static int kgsl_ioctl_sharedmem_from_pmem(struct kgsl_file_private *private,
+						void __user *arg)
 {
 	int result = 0;
-	struct kgsl_map_user_mem param;
+	struct kgsl_sharedmem_from_pmem param;
 	struct kgsl_mem_entry *entry = NULL;
 	unsigned long start = 0, len = 0;
-	struct file *file_ptr = NULL;
+	struct file *pmem_file = NULL;
 
-        if (IOCTL_KGSL_SHAREDMEM_FROM_PMEM == cmd) {
-                if (copy_from_user(&param, arg,
-                        sizeof(struct kgsl_sharedmem_from_pmem))) {
-                        result = -EFAULT;
-                        goto error;
-                }
-                param.memtype = KGSL_USER_MEM_TYPE_PMEM;
-        } else if (copy_from_user(&param, arg, sizeof(param))) {
+	if (copy_from_user(&param, arg, sizeof(param))) {
 		result = -EFAULT;
 		goto error;
 	}
 
-        switch (param.memtype) {
-        case KGSL_USER_MEM_TYPE_PMEM:
-                if (kgsl_get_phys_file(param.fd, &start,
-                                        &len, &file_ptr)) {
-                        KGSL_DRV_ERR("Failed to get pmem region "
-                                "with fd(%d) details\n", param.fd);
-                        result = -EINVAL;
-                        goto error;
-                }
+	if (kgsl_get_phys_file(param.pmem_fd, &start, &len, &pmem_file)) {
+		result = -EINVAL;
+		goto error;
+
+	} else {
 		if (!param.len)
 			param.len = len;
 
@@ -1198,79 +1170,21 @@ static int kgsl_ioctl_map_user_mem(struct kgsl_file_private *private,
 					"0x%x + 0x%x >= 0x%lx\n",
 				     __func__, param.offset, param.len, len);
 			result = -EINVAL;
-                        goto error_put_file_ptr;
-                }
-                break;
-        case KGSL_USER_MEM_TYPE_ADDR:
-        case KGSL_USER_MEM_TYPE_ASHMEM:
-        {
-                struct vm_area_struct *vma;
-#ifndef CONFIG_MSM_KGSL_MMU
-                        KGSL_DRV_ERR("cannot map non-contig "
-                                "memory as MMU is turned off\n");
-                        result = -EINVAL;
-                        goto error;
-#endif
-                if (!param.hostptr) {
-                        result = -EINVAL;
-                        goto error;
-                }
-                start = param.hostptr;
-                down_write(&current->mm->mmap_sem);
-                vma = kgsl_get_vma_from_start_addr(param.hostptr);
-                len = vma->vm_end - vma->vm_start;
-                if (!param.len)
-                        param.len = len;
-                else if (param.len != len) {
-                        KGSL_DRV_ERR("param.len(%d) invalid for given host "
-                                "address(%x)\n", param.len, param.hostptr);
-                        result = -EINVAL;
-                        goto error_up_write;
-                }
-                if (param.memtype == KGSL_USER_MEM_TYPE_ASHMEM) {
-                        struct file *ashmem_vm_file;
-                        if (get_ashmem_file(param.fd, &file_ptr,
-                                        &ashmem_vm_file, &len)) {
-                                KGSL_DRV_ERR("could not get ashmem "
-                                                "file pointer\n");
-                                result = -EINVAL;
-                                goto error_up_write;
-                        }
-                        if (ashmem_vm_file != vma->vm_file) {
-                                KGSL_DRV_ERR("ashmem shmem file(%p) does not "
-                                "match to given vma->vm_file(%p)\n",
-                                ashmem_vm_file, vma->vm_file);
-                                result = -EINVAL;
-                                goto error_put_file_ptr;
-                        }
-                        if (len != (vma->vm_end - vma->vm_start)) {
-                                KGSL_DRV_ERR("ashmem region len(%ld) does not "
-                                "match vma region len(%ld)",
-                                len, vma->vm_end - vma->vm_start);
-                                result = -EINVAL;
-                                goto error_put_file_ptr;
-                        }
-                }
-                break;
-        }
-        default:
-                KGSL_MEM_ERR("Invalid memory type used\n");
-                result = -EINVAL;
-                goto error;
+			goto error_put_pmem;
 		}
 	}
 
 	KGSL_MEM_INFO("get phys file %p start 0x%lx len 0x%lx\n",
-                      file_ptr, start, len);
-        KGSL_DRV_DBG("locked phys file %p\n", file_ptr);
+		      pmem_file, start, len);
+	KGSL_DRV_DBG("locked phys file %p\n", pmem_file);
 
 	entry = kzalloc(sizeof(*entry), GFP_KERNEL);
 	if (entry == NULL) {
 		result = -ENOMEM;
-		goto error_put_file_ptr;
+		goto error_put_pmem;
 	}
 
-	entry->file_ptr = file_ptr;
+	entry->pmem_file = pmem_file;
 
 	entry->memdesc.pagetable = private->pagetable;
 
@@ -1280,20 +1194,10 @@ static int kgsl_ioctl_map_user_mem(struct kgsl_file_private *private,
 	entry->memdesc.hostptr = NULL;
 	/* ensure that MMU mappings are at page boundary */
 	entry->memdesc.physaddr = start + (param.offset & KGSL_PAGEMASK);
-        if (param.memtype != KGSL_USER_MEM_TYPE_PMEM) {
-                result = kgsl_mmu_map(private->pagetable,
-                                entry->memdesc.physaddr, entry->memdesc.size,
-                                GSL_PT_PAGE_RV | GSL_PT_PAGE_WV,
-                                &entry->memdesc.gpuaddr,
-                                KGSL_MEMFLAGS_ALIGN4K | KGSL_MEMFLAGS_HOSTADDR);
-                entry->memdesc.priv = KGSL_MEMFLAGS_HOSTADDR;
-        } else {
-                result = kgsl_mmu_map(private->pagetable, 
-                                entry->memdesc.physaddr, entry->memdesc.size,
-                                GSL_PT_PAGE_RV | GSL_PT_PAGE_WV,
-                                &entry->memdesc.gpuaddr,
-                                KGSL_MEMFLAGS_ALIGN4K | KGSL_MEMFLAGS_CONPHYS);
-        }
+	result = kgsl_mmu_map(private->pagetable, entry->memdesc.physaddr,
+			entry->memdesc.size, GSL_PT_PAGE_RV | GSL_PT_PAGE_WV,
+			&entry->memdesc.gpuaddr,
+			KGSL_MEMFLAGS_ALIGN4K | KGSL_MEMFLAGS_CONPHYS);
 	if (result)
 		goto error_free_entry;
 
@@ -1302,18 +1206,10 @@ static int kgsl_ioctl_map_user_mem(struct kgsl_file_private *private,
 	entry->memdesc.gpuaddr += (param.offset & ~KGSL_PAGEMASK);
 	param.gpuaddr = entry->memdesc.gpuaddr;
 
-	if (IOCTL_KGSL_SHAREDMEM_FROM_PMEM == cmd) {
-		if (copy_to_user(arg, &param,
-                        sizeof(struct kgsl_sharedmem_from_pmem))) {
-                        result = -EFAULT;
-                        goto error_unmap_entry;
-                }
-        } else if (copy_to_user(arg, &param, sizeof(param))) {
+	if (copy_to_user(arg, &param, sizeof(param))) {
 		result = -EFAULT;
 		goto error_unmap_entry;
 	}
-        if (param.memtype != KGSL_USER_MEM_TYPE_PMEM)
-                up_write(&current->mm->mmap_sem);
 	list_add(&entry->list, &private->mem_list);
 	return result;
 
@@ -1324,15 +1220,8 @@ error_unmap_entry:
 error_free_entry:
 	kfree(entry);
 
-error_put_file_ptr:
-        if ((param.memtype != KGSL_USER_MEM_TYPE_PMEM) && file_ptr)
-                put_ashmem_file(file_ptr);
-        else
-                kgsl_put_phys_file(file_ptr);
-
-error_up_write:
-        if (param.memtype != KGSL_USER_MEM_TYPE_PMEM)
-                up_write(&current->mm->mmap_sem);
+error_put_pmem:
+	kgsl_put_phys_file(pmem_file);
 
 error:
 	return result;
@@ -1463,12 +1352,12 @@ static long kgsl_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 		break;
 #endif
 	case IOCTL_KGSL_SHAREDMEM_FROM_PMEM:
-	case IOCTL_KGSL_MAP_USER_MEM:
 		kgsl_runpending_all();
-                result = kgsl_ioctl_map_user_mem(dev_priv->process_priv,
-                                                        (void __user *)arg,
-                                                        cmd);		
+		result = kgsl_ioctl_sharedmem_from_pmem(dev_priv->process_priv,
+							(void __user *)arg);
 		break;
+
+
 
 	default:
 		/* call into device specific ioctls */
