@@ -58,7 +58,7 @@ static const char driver_name[] = "msm72k_udc";
 
 #define EPT_FLAG_IN        0x0001
 
-#define SETUP_BUF_SIZE      4096
+#define SETUP_BUF_SIZE      8
 
 
 static const char *const ep_name[] = {
@@ -1766,7 +1766,6 @@ static int msm72k_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	if (!req->busy) {
 		dev_dbg(&ui->pdev->dev, "%s: !req->busy\n", __func__);
 		spin_unlock_irqrestore(&ui->lock, flags);
-		BUG_ON(!req->busy);
 		return -EINVAL;
 	}
 	/* Stop the transfer */
@@ -1799,6 +1798,13 @@ static int msm72k_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 	dma_unmap_single(NULL, req->dma, req->req.length,
 		(ep->flags & EPT_FLAG_IN) ?
 		DMA_TO_DEVICE : DMA_FROM_DEVICE);
+ 
+        if (req->req.complete) {
+                req->req.status = -ECONNRESET;
+                spin_unlock_irqrestore(&ui->lock, flags);
+                req->req.complete(&ep->ep, &req->req);
+                spin_lock_irqsave(&ui->lock, flags);
+        }
 
 	if (!req->live) {
 		/* Reprime the endpoint for the remaining transfers */
@@ -1810,7 +1816,7 @@ static int msm72k_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 		return 0;
 	}
 	spin_unlock_irqrestore(&ui->lock, flags);
-	return -EINVAL;
+	return 0;
 }
 
 static int
