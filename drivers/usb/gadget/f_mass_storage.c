@@ -682,8 +682,7 @@ static int fsg_function_setup(struct usb_function *f,
 	u16			w_length = le16_to_cpu(ctrl->wLength);
 
 	DBG(fsg, "fsg_function_setup\n");
-	if (w_index != intf_desc.bInterfaceNumber)
-		return value;
+
 	/* Handle Bulk-only class-specific requests */
 	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_CLASS) {
 	DBG(fsg, "USB_TYPE_CLASS\n");
@@ -2258,10 +2257,8 @@ static int alloc_request(struct fsg_dev *fsg, struct usb_ep *ep,
  */
 static int do_set_interface(struct fsg_dev *fsg, int altsetting)
 {
-	struct usb_composite_dev *cdev = fsg->cdev;
 	int	rc = 0;
 	int	i;
-	const struct usb_endpoint_descriptor	*d;
 
 	if (fsg->running)
 		DBG(fsg, "reset interface\n");
@@ -2281,35 +2278,9 @@ reset:
 		}
 	}
 
-	/* Disable the endpoints */
-	if (fsg->bulk_in_enabled) {
-		DBG(fsg, "usb_ep_disable %s\n", fsg->bulk_in->name);
-		usb_ep_disable(fsg->bulk_in);
-		fsg->bulk_in_enabled = 0;
-	}
-	if (fsg->bulk_out_enabled) {
-		DBG(fsg, "usb_ep_disable %s\n", fsg->bulk_out->name);
-		usb_ep_disable(fsg->bulk_out);
-		fsg->bulk_out_enabled = 0;
-	}
-
 	fsg->running = 0;
 	if (altsetting < 0 || rc != 0)
 		return rc;
-
-	DBG(fsg, "set interface %d\n", altsetting);
-
-	/* Enable the endpoints */
-	d = ep_desc(cdev->gadget, &fs_bulk_in_desc, &hs_bulk_in_desc);
-	if ((rc = enable_endpoint(fsg, fsg->bulk_in, d)) != 0)
-		goto reset;
-	fsg->bulk_in_enabled = 1;
-
-	d = ep_desc(cdev->gadget, &fs_bulk_out_desc, &hs_bulk_out_desc);
-	if ((rc = enable_endpoint(fsg, fsg->bulk_out, d)) != 0)
-		goto reset;
-	fsg->bulk_out_enabled = 1;
-	fsg->bulk_out_maxpacket = le16_to_cpu(d->wMaxPacketSize);
 
 	/* Allocate the requests */
 	for (i = 0; i < NUM_BUFFERS; ++i) {
@@ -2996,7 +2967,28 @@ static int fsg_function_set_alt(struct usb_function *f,
 		unsigned intf, unsigned alt)
 {
 	struct fsg_dev	*fsg = func_to_dev(f);
+        struct usb_composite_dev *cdev = fsg->cdev;
+        const struct usb_endpoint_descriptor    *d;
+        int rc;
+
 	DBG(fsg, "fsg_function_set_alt intf: %d alt: %d\n", intf, alt);
+
+        /* Enable the endpoints */
+        d = ep_desc(cdev->gadget, &fs_bulk_in_desc, &hs_bulk_in_desc);
+        rc = enable_endpoint(fsg, fsg->bulk_in, d);
+        if (rc)
+                return rc;
+        fsg->bulk_in_enabled = 1;
+ 
+        d = ep_desc(cdev->gadget, &fs_bulk_out_desc, &hs_bulk_out_desc);
+        rc = enable_endpoint(fsg, fsg->bulk_out, d);
+        if (rc) {
+                usb_ep_disable(fsg->bulk_in);
+                fsg->bulk_in_enabled = 0;
+                return rc;
+        }
+        fsg->bulk_out_enabled = 1;
+        fsg->bulk_out_maxpacket = le16_to_cpu(d->wMaxPacketSize);
 	fsg->new_config = 1;
 	//ruanmeisi move do_set_interface to
 	//handle_exception which called in fsg_main_thread()
@@ -3009,6 +3001,18 @@ static void fsg_function_disable(struct usb_function *f)
 {
 	struct fsg_dev	*fsg = func_to_dev(f);
 	DBG(fsg, "fsg_function_disable\n");
+
+        /* Disable the endpoints */
+        if (fsg->bulk_in_enabled) {
+                DBG(fsg, "usb_ep_disable %s\n", fsg->bulk_in->name);
+                usb_ep_disable(fsg->bulk_in);
+                fsg->bulk_in_enabled = 0;
+        }
+        if (fsg->bulk_out_enabled) {
+                DBG(fsg, "usb_ep_disable %s\n", fsg->bulk_out->name);
+                usb_ep_disable(fsg->bulk_out);
+                fsg->bulk_out_enabled = 0;
+        }
 	//ruanmeisi move do_set_interface to
 	//handle_exception which called in fsg_main_thread()
 	/* if (fsg->new_config) */
