@@ -52,13 +52,15 @@ static int pmem_fixup_high_low(unsigned short *high,
 	phys_size = (unsigned long)high_low_short_to_ptr(size_high, size_low);
 	MM_DBG("virt %x %x\n", (unsigned int)phys_addr,
 			(unsigned int)phys_size);
-	if (adsp_pmem_fixup_kvaddr(module, &phys_addr, &kvaddr, phys_size,
-				filp, offset)) {
-		MM_ERR("ah%x al%x sh%x sl%x addr %x size %x\n",
-			*high, *low, size_high,
-			size_low, (unsigned int)phys_addr,
-			(unsigned int)phys_size);
-		return -1;
+        if (phys_addr) {
+                if (adsp_pmem_fixup_kvaddr(module, &phys_addr,
+                         &kvaddr, phys_size, filp, offset)) {
+                        MM_ERR("ah%x al%x sh%x sl%x addr %x size %x\n",
+                                        *high, *low, size_high,
+                                        size_low, (unsigned int)phys_addr,
+                                        (unsigned int)phys_size);
+                        return -EINVAL;
+                }
 	}
 	ptr_to_high_low_short(phys_addr, high, low);
 	MM_DBG("phys %x %x\n", (unsigned int)phys_addr,
@@ -137,7 +139,12 @@ static int verify_vdec_pkt_cmd(struct msm_adsp_module *module,
 		skip = 0;
 		start_pos = 5;
 		break;
-        case 0xDD01: /* VP6 */
+        case 0xC201: /*WMV main profile*/
+                 num_addr = 3;
+                 skip = 0;
+                 start_pos = 6;
+                 break;        
+	case 0xDD01: /* VP6 */
                 num_addr = 3;
                 skip = 0;
                 start_pos = 10;
@@ -154,23 +161,30 @@ static int verify_vdec_pkt_cmd(struct msm_adsp_module *module,
 			      &frame_buffer_size_high,
 			      &frame_buffer_size_low);
 	for (i = 0; i < num_addr; i++) {
-		if (pmem_fixup_high_low(frame_buffer_high, frame_buffer_low,
-					frame_buffer_size_high,
-					frame_buffer_size_low,
-					module,
-					NULL, NULL, NULL, NULL))
-			return -1;
+                if (frame_buffer_high && frame_buffer_low) {
+                        if (pmem_fixup_high_low(frame_buffer_high,
+                                                frame_buffer_low,
+                                                frame_buffer_size_high,
+                                                frame_buffer_size_low,
+                                                module,
+                                                NULL, NULL, NULL, NULL))
+                                return -EINVAL;
+           }
 		frame_buffer_high += 2;
 		frame_buffer_low += 2;
 	}
 	/* Patch the output buffer. */
 	frame_buffer_high += 2*skip;
 	frame_buffer_low += 2*skip;
-	if (pmem_fixup_high_low(frame_buffer_high, frame_buffer_low,
-				frame_buffer_size_high,
-				frame_buffer_size_low, module, NULL, NULL,
-				NULL, NULL))
-		return -1;
+        if (frame_buffer_high && frame_buffer_low) {
+                if (pmem_fixup_high_low(frame_buffer_high,
+                                        frame_buffer_low,
+                                        frame_buffer_size_high,
+                                        frame_buffer_size_low,
+                                        module,
+                                        NULL, NULL, NULL, NULL))
+                        return -EINVAL;
+        }
 	if (filp) {
 		pmem_addr.vaddr = subframe_pkt_addr;
 		pmem_addr.length = ((subframe_pkt_size + 31) & (~31)) + 32;
