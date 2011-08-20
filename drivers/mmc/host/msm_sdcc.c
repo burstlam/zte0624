@@ -1730,7 +1730,7 @@ msmsdcc_probe(struct platform_device *pdev)
 		if (ret) {
 			pr_err("Unable to get sdio wakeup IRQ %d (%d)\n",
 				plat->sdiowakeup_irq, ret);
-			goto irq_free;
+			goto pio_irq_free;
 		} else {
 #ifndef CONFIG_BCM_WIFI		
 			set_irq_wake(plat->sdiowakeup_irq, 1);
@@ -1841,6 +1841,8 @@ msmsdcc_probe(struct platform_device *pdev)
 		set_irq_wake(plat->sdiowakeup_irq, 0);
 		free_irq(plat->sdiowakeup_irq, host);
 	}
+ pio_irq_free:
+	free_irq(irqres->start, host);
  irq_free:
 	free_irq(irqres->start, host);
  clk_disable:
@@ -1898,6 +1900,7 @@ static int msmsdcc_remove(struct platform_device *pdev)
 		free_irq(plat->sdiowakeup_irq, host);
 	}
 
+	free_irq(host->irqres->start, host);
 	free_irq(host->irqres->start, host);
 
 	clk_put(host->clk);
