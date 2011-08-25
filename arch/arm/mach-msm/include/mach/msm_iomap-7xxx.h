@@ -115,4 +115,3 @@ when                who               what, where, why                comment ta
 #define MSM_SMEM_RAM_SIZE     SZ_1M
 
 #endif
-
