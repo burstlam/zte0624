@@ -220,16 +220,10 @@ config CPU_FREQ_GOV_ONDEMAND_INPUT
 	Enable installation of an input event handler which will ramp up the
 	CPU to max frequency when an input event is received.
 
-config CPU_FREQ_GOV_INTERACTIVE
-	tristate "'interactive' cpufreq policy governor"
-	help
-	  'interactive' - This driver adds a dynamic cpufreq policy governor
-	  designed for latency-sensitive workloads.
-
 config CPU_FREQ_GOV_INTERACTIVEX
 	tristate "'interactiveX' cpufreq policy governor"
 	help
-	  'interactiveX' - Modified version of interactive with sleep+wake code.
+	  'InteractiveX' - Modified version of interactive with sleep+wake code.
 
 config CPU_FREQ_GOV_CONSERVATIVE
 	tristate "'conservative' cpufreq governor"
@@ -258,16 +252,16 @@ config CPU_FREQ_GOV_SMARTASS
 	tristate "'smartass' cpufreq governor"
 	depends on CPU_FREQ
 	help
-	  'smartass' - a "smart" optimized governor for the hero! also good for
+	  'Smartass' - a "smart" optimized governor for the hero! also good for
 	  for other lowerend devices.
 
-config CPU_FREQ_GOV_SMOOTHASS
-	tristate "'smoothass' cpufreq governor"
+config CPU_FREQ_GOV_SMARTASS2
+	tristate "'smartass2' cpufreq governor"
 	depends on CPU_FREQ
 	help
-	smoothass' - a "slightly more agressive smartass" governor!
+	  'Smartass2' - a "slightly more agressive smartass" governor!
  	
-	If in doubt, say N.
+	  If in doubt, say N.
 
 config CPU_FREQ_GOV_SCARY
 	tristate "'scary' cpufreq governor"
